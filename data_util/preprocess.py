@@ -132,49 +132,44 @@ class Preprocess(object):
         batch_size = 50000  # Processes 50,000 buildings in batches, adjustable based on memory availability
         total_buildings = len(building)
         
-        # Used to store the processing results of all batches
-        final_buildings = []
+        # Open the file and prepare to save the results in batches
+        with open(self.building_out_path, 'wb') as building_file:
+            for batch_start in tqdm(range(0, total_buildings, batch_size)):
+                batch_buildings = building[batch_start:batch_start + batch_size]
+                
+                for b in tqdm(batch_buildings):
+                    # Sum up all the POIs within the building's bounding box
+                    b['poi'] = [0] * poi_dim
+                    bounds = b['shape'].bounds
+                    cx = (bounds[0] + bounds[2]) / 2
+                    cy = (bounds[1] + bounds[3]) / 2
+                    height = bounds[3] - bounds[1]
+                    width = bounds[2] - bounds[0]
+                    radius = np.sqrt(height ** 2 + width ** 2) / 2
 
-        for batch_start in tqdm(range(0, total_buildings, batch_size)):
-            batch_buildings = building[batch_start:batch_start + batch_size]
-            
-            for b in tqdm(batch_buildings):
-                # Sum up all the POIs within the building's bounding box
-                b['poi'] = [0] * poi_dim
-                bounds = b['shape'].bounds
-                cx = (bounds[0] + bounds[2]) / 2
-                cy = (bounds[1] + bounds[3]) / 2
-                height = bounds[3] - bounds[1]
-                width = bounds[2] - bounds[0]
-                radius = np.sqrt(height ** 2 + width ** 2) / 2
-
-                # Find all POIs within the calculated radius
-                poi_index = poi_tree.query_ball_point([cx, cy], radius)
-                for i in poi_index:
-                    if not b['shape'].contains(Point(poi[i]['x'], poi[i]['y'])):
-                        continue
-                    b['poi'] = [b['poi'][j] + poi[i]['onehot'][j] for j in range(poi_dim)]
-                    attached_poi.append(poi[i])
-            
-            # Add the processed buildings in each batch to the final result
-            final_buildings.extend(batch_buildings)
-            
-            # Clean up unnecessary memory
-            del batch_buildings
-            import gc
-            gc.collect()
+                    # Find all POIs within the calculated radius
+                    poi_index = poi_tree.query_ball_point([cx, cy], radius)
+                    for i in poi_index:
+                        if not b['shape'].contains(Point(poi[i]['x'], poi[i]['y'])):
+                            continue
+                        b['poi'] = [b['poi'][j] + poi[i]['onehot'][j] for j in range(poi_dim)]
+                        attached_poi.append(poi[i])
+                
+                # Save each batch of building data to a file and write it batch by batch
+                pkl.dump(batch_buildings, building_file, protocol=4)
+                       
+                # Clean up unnecessary memory
+                del batch_buildings
+                import gc
+                gc.collect()
 
         # Store the POIs that were not attached to any buildings
         poi_not_attached = [p for p in poi if p not in attached_poi]
-
-        # Save the processed buildings and POI data to pickle files
-        print('Saving building and poi data...')
-        with open(self.building_out_path, 'wb') as f:
-            pkl.dump(final_buildings, f, protocol=4)
+        print('Saving poi data...')
         with open(self.poi_out_path, 'wb') as f:
             pkl.dump(poi_not_attached, f, protocol=4)
 
-        return final_buildings, poi_not_attached
+        return building, poi_not_attached
 
     def poisson_disk_sampling(self, building_list, poi_list, radius, force=False):
         """
